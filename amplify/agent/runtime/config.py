@@ -13,7 +13,7 @@ def get_model_config(model_type: str = "sonnet") -> dict:
     else:
         # Claude Sonnet 4.6（デフォルト）
         return {
-            "model_id": "us.anthropic.claude-sonnet-4-6",
+            "model_id": "jp.anthropic.claude-sonnet-4-6",
             "cache_prompt": "default",
             "cache_tools": "default",
         }
