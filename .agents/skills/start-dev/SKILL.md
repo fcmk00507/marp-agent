@@ -33,7 +33,7 @@ Amplifyサンドボックス（バックエンド）とフロントエンド（V
 `$ARGUMENTS` を解析して以下の変数を決定する：
 
 - **REPO_DIR**: 対象リポジトリのパス
-  - main → カレントワーキングディレクトリ（Claude Codeのプロジェクトルート）
+  - main → カレントワーキングディレクトリ（Codexのプロジェクトルート）
   - kag → カレントワーキングディレクトリから `../marp-agent-kag`
 - **AWS_PROFILE**: AWSプロファイル名
   - main → `sandbox`

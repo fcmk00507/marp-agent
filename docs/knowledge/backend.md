@@ -528,6 +528,40 @@ pptx_bytes = task.result()
 
 フロントエンド側のSSEパーサーは未知の `type` を無視するため、`progress` イベントの追加でフロントエンドの変更は不要。
 
+### メインストリーミングのSSE keep-alive
+
+エージェントのメインストリーミング（`stream_async`）でも同様のkeep-alive問題がある。Strandsは**ツール引数の生成中にイベントをyieldしない**ため、大きなスライド（16ページのタイムテーブル等）のMarpマークダウンをtool引数として生成する間、フロントエンドのSSEタイムアウト（60秒）に達することがある。
+
+対策として、`asyncio.wait` + タイムアウトで10秒ごとにkeep-aliveを送信する：
+
+```python
+STREAM_KEEPALIVE_INTERVAL = 10.0
+_STREAM_SENTINEL = object()
+
+async def _safe_anext(aiter):
+    try:
+        return await aiter.__anext__()
+    except StopAsyncIteration:
+        return _STREAM_SENTINEL
+
+# ストリーミングループ
+stream_iter = stream.__aiter__()
+pending = asyncio.ensure_future(_safe_anext(stream_iter))
+
+while True:
+    done, _ = await asyncio.wait({pending}, timeout=STREAM_KEEPALIVE_INTERVAL)
+    if not done:
+        yield {"type": "progress", "message": "処理中..."}
+        continue
+    event = pending.result()
+    if event is _STREAM_SENTINEL:
+        break
+    # ... イベント処理 ...
+    pending = asyncio.ensure_future(_safe_anext(stream_iter))
+```
+
+`progress` イベントはフロントエンドの `handleEvent` で `default` ケースに入り、`content`/`data` フィールドがないため何も表示されずに無視される。SSEパーサーのタイムアウトタイマーのみがリセットされる。
+
 ### ツール駆動型のマークダウン出力
 
 マークダウンをテキストでストリーミング出力すると、フロントエンドで除去処理が複雑になる。
@@ -699,6 +733,39 @@ def search_and_summarize(query: str) -> str:
 | Sonnet（圧縮前） | ~3,073 |
 | Sonnet（圧縮後） | ~2,043 |
 | Opus（圧縮前） | ~6,146 |
+
+### ⚠️ Prompt cachingの最低ライン（1024トークン）
+
+Bedrockのprompt cachingはツール定義の**合計トークンが1024以上**ないと機能しない。これを下回るとCache Write/Readの費用がゼロになりキャッシュが完全停止する。
+
+#### 設計意図：スライドルールをツールdocstringに分散している理由
+
+`config.py` のシステムプロンプトは意図的に最小限（ペルソナ＋テーマ変数のみ）に保ち、スライドフォーマットルールや構成テクニックは各ツールのdocstringに記述している。
+
+**理由**: Bedrockのprompt cachingを確実に有効化するため。
+
+```
+システムプロンプト（config.py）:  ~50トークン（ペルソナ＋テーマ変数のみ）
+output_slide のdocstring:        ~500トークン（Marpルール・構成テクニック）
+web_search のdocstring:          ~150トークン（使い方ルール）
+http_request のdocstring:        ~200トークン（使用条件・制約）
+generate_tweet_url のdocstring:  ~80トークン（フォーマット）
+─────────────────────────────────────────────
+ツール定義合計:                   ~1,000トークン以上（1024超えを確保）
+```
+
+この設計により：
+1. **キャッシュが安定動作する** → Cache Read（90%オフ）が毎ターン適用される
+2. **docstringが本来の意図で書ける** → 「キャッシュトークン数を水増しするため」ではなく「そのツールを使うときの正しいルール」として記述できる
+3. **ルールと実装が近い場所にある** → output_slideのルールはoutput_slideのファイルにある（可読性・保守性↑）
+
+#### 注意：ツールをシンプルなカスタム実装に置き換える際のリスク
+
+`strands_tools.http_request`（21パラメータ / ~884トークン）のような**リッチなビルトインツールをシンプルなカスタムツールに置き換えるとトークン数が激減**し、合計が1024を割り込んでキャッシュが停止することがある。
+
+**実例（2026-02-21）**: http_requestをカスタム実装に置き換えた際、ツール合計が~1096→~302トークンに減少してキャッシュが完全停止。Cost ExplorerのCacheWrite/CacheReadがゼロになったことで発覚。`output_slide` のdocstringにMarpルールを移動することで合計1024超えを回復。
+
+**診断方法**: Cost Explorerでモデル別にCacheWrite値を確認し、ゼロになった日付のコミットを調査する。
 
 ---
 

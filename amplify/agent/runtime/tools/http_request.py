@@ -64,14 +64,29 @@ def _summarize_with_haiku(content: str) -> str:
 
 @tool
 def http_request(url: str, method: str = "GET") -> str:
-    """指定URLにHTTPリクエストを送信し、レスポンスを返します。大きなレスポンスは自動的に要約されます。
+    """ユーザーがメッセージに貼ったURLのWebページを取得します。
+
+    **使用条件**: ユーザーがURLを直接メッセージに貼った場合のみ使用してください。
+    web_searchの検索結果URLには使用しないこと（snippetで十分スライドは作れる）。
+
+    ## 自動処理
+
+    - HTMLは自動でテキスト変換（script/styleタグ除去）
+    - 5,000文字超のレスポンスはClaude Haikuが要約（固有名詞・数値・事実を保持）
+    - 要約失敗時は先頭5,000文字を切り詰めて返す
+
+    ## 制約
+
+    - タイムアウト: 30秒
+    - 認証が必要なページ・動的JSレンダリングページは取得不可
+    - PDF・画像・動画URLはテキストとして取得不可
 
     Args:
-        url: リクエスト先のURL
+        url: リクエスト先のURL（HTTPまたはHTTPS）
         method: HTTPメソッド（デフォルト: GET）
 
     Returns:
-        レスポンスの内容（大きい場合はAIによる要約）
+        レスポンスのステータスコードとコンテンツ（大きい場合はHaiku要約）
     """
     try:
         response = req.request(method, url, timeout=30)
